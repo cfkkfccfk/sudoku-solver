@@ -72,19 +72,39 @@ def parse_puzzle(s: str) -> Grid:
 
 def input_puzzle() -> Optional[Grid]:
     """Prompt the user to enter a puzzle."""
-    print("\n请输入数独（81位，0或.表示空格）:")
-    print("示例 (Peter Norvig 经典题):")
-    print("  800000000003600000070090200060005030004080000000000060000803001009000050020000000")
-    print("输入 'sample' 加载示例, 'q' 退出")
+    print("\n请输入数独（81位，0或.表示空格）")
+    print("  或输入 'sample easy / medium / hard' 加载示例题")
+    print("  输入 'q' 退出")
     print()
 
     while True:
         raw = input("数独 > ").strip()
         if raw.lower() == 'q':
             return None
-        if raw.lower() == 'sample':
-            raw = SAMPLE_PUZZLES["hard"]
-            print(f"已加载示例: {raw}")
+
+        # Handle sample commands: 'sample', 'sample easy', 'sample hard', etc.
+        parts = raw.lower().split()
+        if parts and parts[0] == 'sample':
+            key = parts[1] if len(parts) > 1 else None
+            if key in SAMPLE_PUZZLES:
+                loaded_key = key
+            elif key is None:
+                # Show menu and let user pick
+                print("  请选择示例难度:")
+                for k in SAMPLE_PUZZLES:
+                    print(f"    {k}")
+                choice = input("  > ").strip().lower()
+                if choice in SAMPLE_PUZZLES:
+                    loaded_key = choice
+                else:
+                    print(f"  ✗ 未知难度，可选: {', '.join(SAMPLE_PUZZLES)}")
+                    continue
+            else:
+                print(f"  ✗ 未知难度，可选: {', '.join(SAMPLE_PUZZLES)}")
+                continue
+            raw = SAMPLE_PUZZLES[loaded_key]
+            print(f"  已加载 [{loaded_key}]: {raw}")
+
         try:
             grid = parse_puzzle(raw)
             return grid
