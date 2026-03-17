@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from grid import Grid
 from solver import Solver, SolveStep, DIFFICULTY_NAMES
+from database import PuzzleDB
 from typing import List, Optional
 
 
@@ -48,12 +49,6 @@ def difficulty_label(d: int) -> str:
 # Input parsing
 # -----------------------------------------------------------------------
 
-SAMPLE_PUZZLES = {
-    "easy":   "530070000600195000098000060800060003400803001700020006060000280000419005000080079",
-    "medium": "000008010002000006500340900040009050800060009020500040001037004600000100070200000",
-    "hard":   "800000000003600000070090200060005030004080000000000060000803001009000050020000000",  # Inkala
-}
-
 def parse_puzzle(s: str) -> Grid:
     """Parse an 81-char sudoku string (digits, 0 or . for empty)."""
     cleaned = ''
@@ -70,10 +65,47 @@ def parse_puzzle(s: str) -> Grid:
     return Grid.from_string(cleaned)
 
 
-def input_puzzle() -> Optional[Grid]:
+def _db_menu(db: PuzzleDB) -> Optional[Grid]:
+    """Let the user pick a puzzle from the database. Returns a Grid or None."""
+    print()
+    print(f"数据库: {db.summary()}")
+    diffs = db.all_difficulties()
+    if not diffs:
+        print("  数据库为空，请先输入数独。")
+        return None
+
+    print("  可选难度:", ' / '.join(str(d) for d in diffs))
+    raw = input("  请输入难度 (或 q 取消) > ").strip().lower()
+    if raw == 'q':
+        return None
+    if not raw.isdigit() or int(raw) not in diffs:
+        print(f"  ✗ 无效难度")
+        return None
+    diff = int(raw)
+
+    group = db.get_by_difficulty(diff)
+    print(f"  难度 {diff} 共 {len(group)} 题")
+    print(f"  输入题号例如 {diff}-{len(group)}，或 r 随机选择")
+    raw2 = input("  > ").strip().lower()
+    if raw2 == 'r':
+        record = db.get_random(diff)
+    elif raw2.isdigit():
+        record = db.get_by_index(diff, int(raw2))
+        if record is None:
+            print(f"  ✗ 题号超出范围 (1-{len(group)})")
+            return None
+    else:
+        print("  ✗ 无效输入")
+        return None
+
+    print(f"  已加载 [{record['id']}]: {record['puzzle']}")
+    return Grid.from_string(record['puzzle'])
+
+
+def input_puzzle(db: PuzzleDB) -> Optional[Grid]:
     """Prompt the user to enter a puzzle."""
     print("\n请输入数独（81位，0或.表示空格）")
-    print("  或输入 'sample easy / medium / hard' 加载示例题")
+    print("  或输入 'db' 从数据库选题")
     print("  输入 'q' 退出")
     print()
 
@@ -82,28 +114,11 @@ def input_puzzle() -> Optional[Grid]:
         if raw.lower() == 'q':
             return None
 
-        # Handle sample commands: 'sample', 'sample easy', 'sample hard', etc.
-        parts = raw.lower().split()
-        if parts and parts[0] == 'sample':
-            key = parts[1] if len(parts) > 1 else None
-            if key in SAMPLE_PUZZLES:
-                loaded_key = key
-            elif key is None:
-                # Show menu and let user pick
-                print("  请选择示例难度:")
-                for k in SAMPLE_PUZZLES:
-                    print(f"    {k}")
-                choice = input("  > ").strip().lower()
-                if choice in SAMPLE_PUZZLES:
-                    loaded_key = choice
-                else:
-                    print(f"  ✗ 未知难度，可选: {', '.join(SAMPLE_PUZZLES)}")
-                    continue
-            else:
-                print(f"  ✗ 未知难度，可选: {', '.join(SAMPLE_PUZZLES)}")
-                continue
-            raw = SAMPLE_PUZZLES[loaded_key]
-            print(f"  已加载 [{loaded_key}]: {raw}")
+        if raw.lower() == 'db':
+            result = _db_menu(db)
+            if result is not None:
+                return result
+            continue
 
         try:
             grid = parse_puzzle(raw)
@@ -116,7 +131,7 @@ def input_puzzle() -> Optional[Grid]:
 # Function 1 — Difficulty analysis
 # -----------------------------------------------------------------------
 
-def function_analyze(grid: Grid, solver: Solver):
+def function_analyze(grid: Grid, solver: Solver, db: PuzzleDB = None):
     """Report the minimum difficulty level needed to solve the puzzle."""
     print("\n正在分析难度...")
     d = solver.analyze_difficulty(grid)
@@ -128,6 +143,7 @@ def function_analyze(grid: Grid, solver: Solver):
     if d == -1:
         print("⚠  无法用当前技术（难度 1-4）完全求解此数独。")
         print("   可能需要更高级技术（X-Wing、链式推理等）。")
+        effective_d = 5
     else:
         print(f"✓  所需最高难度: {difficulty_label(d)}")
         print()
@@ -135,6 +151,19 @@ def function_analyze(grid: Grid, solver: Solver):
         for k, v in DIFFICULTY_NAMES.items():
             marker = " ◀" if k == d else ""
             print(f"  {k}: {v}{marker}")
+        effective_d = d
+
+    # Offer to save to database
+    if db is not None:
+        puzzle_str = ''.join(str(grid.values[r][c]) for r in range(9) for c in range(9))
+        if db.exists(puzzle_str):
+            print("\n(此题已在数据库中，无需重复添加)")
+        else:
+            print()
+            ans = input(f"是否将此题（难度 {effective_d}）加入数据库？(y/n) > ").strip().lower()
+            if ans == 'y':
+                pid = db.add(puzzle_str, effective_d)
+                print(f"  ✓ 已保存，题目 ID: {pid}")
 
 
 # -----------------------------------------------------------------------
@@ -352,6 +381,7 @@ def function_step(grid: Grid, solver: Solver):
 
 def main():
     solver = Solver()
+    db = PuzzleDB()
 
     print()
     print("╔══════════════════════════════════╗")
@@ -364,7 +394,7 @@ def main():
     while True:
         # Always need a puzzle loaded first
         if grid is None:
-            grid = input_puzzle()
+            grid = input_puzzle(db)
             if grid is None:
                 print("再见！")
                 break
@@ -383,7 +413,7 @@ def main():
         choice = input("选择 > ").strip().lower()
 
         if choice == '1':
-            function_analyze(grid, solver)
+            function_analyze(grid, solver, db)
         elif choice == '2':
             function_solve(grid, solver)
         elif choice == '3':
