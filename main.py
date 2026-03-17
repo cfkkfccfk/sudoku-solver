@@ -149,14 +149,17 @@ def render_candidates_grid(grid: Grid, hint=None) -> str:
       row 1 → candidates 4 5 6
       row 2 → candidates 7 8 9
 
-    If a hint is provided, the following markers are applied:
-      [v]  — cell that was just filled by a direct hint (shown in middle row)
-      x    — candidate that was just eliminated by this step
-      digit — candidate still present
-      .    — candidate not possible (was already absent before this step)
-    """
-    from techniques.base import Hint as HintType
+    Spacing:
+      Within a cell    : 1 space between each candidate  →  "1 2 3"  (5 chars)
+      Between cells    : 3 spaces within the same box
+      Between boxes    : "  |  "  (2 spaces, pipe, 2 spaces)
 
+    Hint markers:
+      [ v ]  — cell just filled by a direct hint
+       x     — candidate just eliminated by this step
+      digit  — candidate still present
+       .     — position not a candidate (was already absent)
+    """
     # Collect what to highlight from the hint
     elim_set: set = set()   # (row, col, value) eliminated in this step
     set_cell = None          # (row, col, value) directly set in this step
@@ -167,16 +170,21 @@ def render_candidates_grid(grid: Grid, hint=None) -> str:
         for r, c, v in hint.eliminations:
             elim_set.add((r, c, v))
 
+    # Spacing constants
+    INNER_SEP = ' '      # between the 3 candidates within one cell (→ 5-char cell)
+    CELL_SEP  = '   '    # between cells inside the same box (3 spaces)
+    BOX_SEP   = '  |  '  # between boxes (2 + pipe + 2)
+    CELL_W    = 5        # width of one rendered cell: "d d d"
+
     lines = []
 
     for row in range(9):
-        # 3 display lines for this row of cells
-        sub = ['', '', '']
+        sub = ['', '', '']   # 3 display lines for this row of cells
 
         for col in range(9):
-            # Column separator: '|' between boxes, ' ' within a box
+            # Column separator
             if col > 0:
-                sep = '|' if col % 3 == 0 else ' '
+                sep = BOX_SEP if col % 3 == 0 else CELL_SEP
                 sub[0] += sep
                 sub[1] += sep
                 sub[2] += sep
@@ -184,29 +192,30 @@ def render_candidates_grid(grid: Grid, hint=None) -> str:
             v = grid.values[row][col]
 
             if v != 0:
-                # Filled cell — highlight with brackets if just set this step
+                # Filled cell (5 chars wide)
                 if set_cell and set_cell == (row, col, v):
-                    sub[0] += '   '
-                    sub[1] += f'[{v}]'
-                    sub[2] += '   '
+                    # Just set this step → show with brackets
+                    sub[0] += '     '
+                    sub[1] += f'[ {v} ]'
+                    sub[2] += '     '
                 else:
-                    sub[0] += '   '
-                    sub[1] += f' {v} '
-                    sub[2] += '   '
+                    sub[0] += '     '
+                    sub[1] += f'  {v}  '
+                    sub[2] += '     '
             else:
-                # Empty cell — show candidates (or elimination markers)
+                # Empty cell — render each sub-row of candidates
                 cands = grid.candidates[row][col]
                 for i in range(3):
-                    row_str = ''
+                    chars = []
                     for j in range(3):
                         cand = i * 3 + j + 1
                         if (row, col, cand) in elim_set:
-                            row_str += 'x'        # just eliminated
+                            chars.append('x')        # just eliminated
                         elif cand in cands:
-                            row_str += str(cand)  # still a candidate
+                            chars.append(str(cand))  # still a candidate
                         else:
-                            row_str += '.'        # not a candidate
-                    sub[i] += row_str
+                            chars.append('.')        # not a candidate
+                    sub[i] += INNER_SEP.join(chars)  # "1 2 3" style
 
         lines.extend(sub)
 
