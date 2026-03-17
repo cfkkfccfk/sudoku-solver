@@ -50,7 +50,7 @@ def difficulty_label(d: int) -> str:
 
 SAMPLE_PUZZLES = {
     "easy":   "530070000600195000098000060800060003400803001700020006060000280000419005000080079",
-    "medium": "000000000010020030000000000000000000000000000000000000000000000000000000000000000",
+    "medium": "000008010002000006500340900040009050800060009020500040001037004600000100070200000",
     "hard":   "800000000003600000070090200060005030004080000000000060000803001009000050020000000",  # Inkala
 }
 
@@ -219,9 +219,12 @@ def render_candidates_grid(grid: Grid, hint=None) -> str:
 
         lines.extend(sub)
 
-        # Horizontal separator between box rows
-        if row < 8 and (row + 1) % 3 == 0:
-            lines.append('-' * len(sub[0]))
+        # Horizontal separators
+        if row < 8:
+            if (row + 1) % 3 == 0:
+                lines.append('-' * len(sub[0]))  # box boundary
+            else:
+                lines.append('')                 # blank line between rows within a box
 
     return '\n'.join(lines)
 
