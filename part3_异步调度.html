@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Part3 · 异步调度（Async Scheduling）</title>
+<style>
+  :root{
+    --brand:#1a4d7a; --accent:#b4316b; --npu:#0f766e; --frame:#3b4ea8;
+    --sans:"Microsoft YaHei","微软雅黑","Segoe UI","PingFang SC","Helvetica Neue",Arial,sans-serif;
+    --mono:"Cascadia Mono","Consolas","Microsoft YaHei",monospace;
+    --sidebar:340px; --bg:#f6f8fb; --ink:#1e293b;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{margin:0; font-family:var(--sans); color:var(--ink); background:var(--bg); font-size:19.5px; line-height:1.6;}
+
+  /* ---- layout ---- */
+  .sidebar{
+    position:fixed; top:0; left:0; width:var(--sidebar); height:100vh; overflow-y:auto;
+    background:#0f2c47; color:#cbd5e1; padding:22px 16px 40px;
+  }
+  .sidebar .brand{color:#fff; font-size:20px; font-weight:700; line-height:1.35; margin:4px 8px 6px;}
+  .sidebar .sub{color:#7ea6c9; font-size:13px; margin:0 8px 18px;}
+  .toc a{display:block; color:#cbd5e1; text-decoration:none; padding:6px 10px; border-radius:7px; font-size:15.5px; line-height:1.35;}
+  .toc a:hover{background:#173b5c; color:#fff;}
+  .toc a.lvl1{font-weight:700; color:#e8eef5; margin-top:10px;}
+  .toc a.lvl2{padding-left:24px; font-size:14.5px; color:#a9c0d6;}
+  .toc a.active{background:#1f4e79; color:#fff;}
+
+  main{margin-left:var(--sidebar); padding:34px 56px 120px;}
+  h1.title{color:var(--brand); font-size:34px; margin:0 0 4px;}
+  .lead-sub{color:#64748b; font-size:18px; margin:0 0 26px;}
+  section{padding:24px 0; border-top:1px solid #e2e8f0;}
+  section:first-of-type{border-top:none;}
+  h2{color:var(--brand); font-size:27px; margin:6px 0 14px; scroll-margin-top:16px;}
+  h3{color:var(--frame); font-size:22px; margin:18px 0 8px; scroll-margin-top:16px;}
+  .subhead{margin:16px 0 5px; font-weight:700; color:var(--brand); font-size:16px;}
+  .impl-head{margin:22px 0 10px; font-weight:700; font-size:18.5px; color:var(--brand); padding:9px 16px; background:#eef3f8; border-left:6px solid var(--brand); border-radius:0 9px 9px 0;}
+  .impl-head .n{display:inline-block; min-width:1.9em; margin-right:6px; color:#fff; background:var(--brand); border-radius:6px; text-align:center; font-size:14px; padding:0 6px;}
+  p{margin:9px 0;}
+  ul,ol{margin:9px 0; padding-left:1.3em;}
+  li{margin:6px 0;}
+  code{font-family:var(--mono); font-size:0.9em; background:#eaeef3; color:var(--accent); padding:1px 6px; border-radius:4px;}
+  pre{background:#f4f6f8; border:1px solid #e2e8f0; border-radius:10px; padding:15px 19px; overflow:auto; margin:12px 0;}
+  pre code{font-family:var(--mono); font-size:16.5px; line-height:1.55; background:none; color:var(--ink); padding:0;}
+  table{border-collapse:collapse; width:100%; margin:12px 0; font-size:18.5px;}
+  th{background:var(--brand); color:#fff; text-align:left; padding:9px 13px; border:1px solid #cbd5e1;}
+  td{padding:9px 13px; border:1px solid #cbd5e1; vertical-align:top;}
+  blockquote{border-left:5px solid var(--brand); background:#eef3f8; margin:14px 0; padding:11px 18px; border-radius:0 8px 8px 0; color:#334155;}
+  .note{color:#475569; font-size:17px;}
+  .small{color:#64748b; font-size:16px;}
+  .kicker{display:inline-block; font-size:13px; font-weight:700; letter-spacing:1px; color:#fff; background:var(--frame); padding:2px 10px; border-radius:11px; margin-bottom:8px;}
+  .kicker.npu{background:var(--npu);}
+  .kicker.acc{background:var(--accent);}
+  .warn{background:#fef3c7; border-left-color:#d97706; color:#7c2d12;}
+
+  /* ---- diagram primitives ---- */
+  .box{border:2px solid #94a3b8; border-radius:10px; padding:10px 15px; background:#fff; text-align:center; line-height:1.35;}
+  .box .t{display:block; font-weight:700; color:var(--ink); font-size:19px; margin-bottom:3px;}
+  .box .s{display:block; font-size:16px; color:#64748b;}
+  .hl{border-color:var(--brand); background:#e8f1f9;}
+  .accent{border-color:var(--accent); background:#fbeaf1;}
+  .npucol{border-color:var(--npu); background:#e6f4f1;}
+  .framecol{border-color:var(--frame); background:#eef2fd;}
+  .arr{color:var(--brand); font-weight:700; font-size:22px; text-align:center; display:flex; align-items:center; justify-content:center;}
+  .arrd{color:var(--brand); font-weight:700; font-size:20px; text-align:center; margin:3px 0;}
+  .rowf{display:flex; gap:12px; justify-content:center; align-items:stretch; flex-wrap:wrap;}
+  .tag{display:inline-block; font-size:13px; font-weight:700; padding:1px 8px; border-radius:10px; margin-left:5px;}
+  .tag-n{background:#ccfbf1; color:var(--npu);}
+  .tag-p1{background:#e0e7ff; color:var(--frame);}
+  .tag-p3{background:#fbeaf1; color:var(--accent);}
+
+  /* ---- 图形容器 ---- */
+  .dg{margin:14px 0; padding:14px 16px; background:#fff; border:1px solid #dbe3ec; border-radius:12px; overflow-x:auto;}
+  .dg .cap{font-size:15.5px; color:#475569; font-weight:700; margin:0 0 10px;}
+  .dg .foot{font-size:15px; color:#64748b; margin:9px 0 0;}
+
+  /* ---- 甘特 / 泳道时间轴 ---- */
+  /* 泳道、token 带、账本条整体等比放大：字号、格宽、行高一起缩放，
+     这样内部那套 96px 网格的对齐关系不用重算 */
+  .gt, .tkrow, .buf, .marks{zoom:1.15;}
+  .gt{display:flex; align-items:center; gap:4px; margin:4px 0; white-space:nowrap;}
+  /* min-width:0 + white-space:normal 是必需的：否则长标签的 min-content 宽度会撑破 flex-basis，
+     把该行 track 整体右移，与其他泳道错位 */
+  .gt .lb{flex:0 0 132px; min-width:0; white-space:normal; font-size:14px; color:#475569; text-align:right; padding-right:8px; line-height:1.25;}
+  /* 标签较长的图：加宽标签列，泳道整体右移 */
+  .dg.lbw .gt .lb{flex:0 0 208px; padding-right:14px;}
+  .gt .c{width:96px; min-width:96px; height:30px; border-radius:5px; display:flex; align-items:center; justify-content:center;
+         font-size:13px; font-family:var(--mono); border:1.5px solid #94a3b8; background:#fff;}
+  .gt .hd{border:none; background:none; color:#64748b; font-size:13px; height:20px;}
+  /* 跨格括号：用边框画，宽度与格子严格一致（文本版 ├──┤ 会被居中，看着覆盖不到两端） */
+  .gt .hd.brk{border:2px solid #94a3b8; border-bottom:none; border-radius:7px 7px 0 0; height:24px; color:#475569;}
+  .c.gap{border:none; background:none;}
+  .c.idle{background:repeating-linear-gradient(45deg,#f1f5f9,#f1f5f9 5px,#e4e9f0 5px,#e4e9f0 10px); color:#94a3b8; border-color:#cbd5e1;}
+  .c.bub{background:#fee2e2; border-color:#fca5a5; color:#b91c1c; font-weight:700;}
+  .c.cpu{background:#e8f1f9; border-color:var(--brand); color:#1a4d7a;}
+  .c.dev{background:#eef2fd; border-color:var(--frame); color:#3b4ea8;}
+  .c.cpy{background:#e6f4f1; border-color:var(--npu); color:#0f766e;}
+  .c.rb{background:#fbeaf1; border-color:var(--accent); color:#9d174d; font-weight:700;}
+
+  /* ---- token 带 ---- */
+  .tkrow{display:flex; align-items:center; gap:3px; margin:4px 0; white-space:nowrap;}
+  .tklab{flex:0 0 210px; font-size:13.5px; color:#475569; text-align:right; padding-right:8px; white-space:nowrap; line-height:1.25;}
+  .tk{width:52px; min-width:52px; height:31px; display:flex; align-items:center; justify-content:center;
+      border:1.5px solid #94a3b8; border-radius:5px; background:#fff; font-family:var(--mono); font-size:13.5px;}
+  .tk.hole{border-style:dashed; border-color:#fca5a5; background:#fef2f2; color:#dc2626;}
+  .tk.fill{border-color:var(--accent); background:#fbeaf1; color:#9d174d; font-weight:700;}
+  .tk.kept{background:#e8f1f9; border-color:var(--brand); color:#1a4d7a;}
+  .tk.dev{background:#e6f4f1; border-color:var(--npu); color:#0f766e;}
+  .tkend{font-size:13.5px; color:#64748b; padding-left:10px; white-space:normal;}
+
+  /* ---- 分层栈 / 账本条 ---- */
+  .stack{display:flex; flex-direction:column; gap:8px;}
+  .stack .ly{border:2px solid; border-radius:9px; padding:10px 15px; font-size:17px; background:#fff;}
+  .stack .ly .h{font-weight:700; font-size:18px;}
+  .stack .ly .d{font-size:16px; color:#475569;}
+  .stack .ly.l1{border-color:var(--brand); background:#e8f1f9;}
+  .stack .ly.l2{border-color:var(--frame); background:#eef2fd;}
+  .stack .ly.l3{border-color:var(--npu); background:#e6f4f1;}
+
+  .buf{display:flex; border:2px solid var(--brand); border-radius:7px; overflow:hidden; font-family:var(--mono); font-size:14px; margin:6px 0;}
+  .buf .c{padding:8px 4px; text-align:center; border-right:1px solid #cbd5e1;}
+  .buf .c:last-child{border-right:none;}
+  .buf .c.known{background:#e8f1f9; color:var(--brand); font-weight:700; flex:5;}
+  .buf .c.ph{background:#fbeaf1; color:var(--accent); font-weight:700; flex:2;}
+  .marks{display:flex; font-size:13.5px; color:#64748b; margin:0;}
+  .marks span{text-align:center; line-height:1.3;}
+
+  /* ---- 两份账矩阵 ---- */
+  .mtx{border-collapse:collapse; font-size:16.5px; width:auto; margin:4px 0;}
+  .mtx th{background:#eef2fd; color:var(--frame); border:1px solid #c7d2fe; padding:6px 11px; font-size:15.5px; text-align:center;}
+  .mtx th.rl{text-align:left; background:#f8fafc; color:#475569; font-weight:400; white-space:nowrap;}
+  .mtx td{border:1px solid #c7d2fe; padding:6px 15px; text-align:center; font-family:var(--mono); font-size:16px;}
+  .mtx td.ok{background:#e6f4f1; color:var(--npu); font-weight:700;}
+  .mtx td.zero{color:#cbd5e1;}
+
+  /* ---- 顺序链 ---- */
+  .chain{display:flex; align-items:stretch; flex-wrap:wrap; gap:2px;}
+  .chain .st{flex:1 1 150px; border:2px solid #94a3b8; background:#fff; border-radius:10px; padding:8px 10px; text-align:center; font-size:16px; line-height:1.4;}
+  .chain .st b{display:block; font-size:17px; color:var(--ink);}
+  .chain .st .s{font-size:14.5px; color:#64748b; display:block;}
+  /* .s 里的 <b> 只是强调，必须留在行内——否则会被上面那条 display:block 顶成独立一行 */
+  .chain .st .s b{display:inline; font-size:inherit; color:inherit;}
+  .chain .st.k{border-color:var(--brand); background:#e8f1f9;}
+  .chain .st.k2{border-color:var(--accent); background:#fbeaf1;}
+  .chain .sep{display:flex; align-items:center; justify-content:center; color:var(--brand); font-weight:700; font-size:20px; flex:0 0 22px;}
+
+  .chips{display:flex; gap:10px; flex-wrap:wrap; align-items:center; font-size:16px;}
+  .chips .cp{border:1.5px solid var(--brand); background:#e8f1f9; border-radius:20px; padding:5px 15px;}
+  @media (max-width:900px){ :root{--sidebar:0px;} .sidebar{display:none;} main{margin-left:0; padding:20px;}
+    .tklab{flex:0 0 120px;} }
+</style>
+</head>
+<body>
+
+<!-- ============ 侧栏目录 ============ -->
+<nav class="sidebar">
+  <div class="brand">Part3 · 异步调度（Async Scheduling）</div>
+  <div class="sub">vLLM 0.14.0 · 昇腾 NPU · Pangu-v2</div>
+  <div class="toc">
+    <a class="lvl1" href="#intro">本篇定位</a>
+    <a class="lvl1" href="#s1">1 要解决的问题：同步调度的两段空等</a>
+    <a class="lvl1" href="#s2">2 三层配合：引擎、调度器、Worker</a>
+    <a class="lvl2" href="#s21">2.1 引擎侧：让两个 step 同时在跑</a>
+    <a class="lvl2" href="#s22">2.2 调度器侧：欠条记账</a>
+    <a class="lvl2" href="#s23">2.3 Worker 侧：token 值留在设备上</a>
+    <a class="lvl1" href="#s3">3 叠加 MTP：被拒回退落在哪</a>
+    <a class="lvl2" href="#s31">3.1 顺序与两处回退</a>
+    <a class="lvl2" href="#s32">3.2 为什么下一步不用重调度</a>
+    <a class="lvl1" href="#s4">4 稳态时间线：五条泳道</a>
+    <a class="lvl1" href="#s5">5 副作用：DP 同步改走 CPU</a>
+    <a class="lvl2" href="#s51">5.1 为什么必须有这一步</a>
+    <a class="lvl2" href="#s52">5.2 异步调度把它撤到了 CPU</a>
+    <a class="lvl2" href="#s53">5.3 两条拆法</a>
+  </div>
+</nav>
+
+<!-- ============ 正文 ============ -->
+<main>
+  <h1 class="title">Part3 · 异步调度（Async Scheduling）</h1>
+  <p class="lead-sub">CPU 调度与设备 forward 重叠　｜　<code>num_output_placeholders</code> 占位符记账　｜　叠加 MTP 后的两处回退</p>
+
+  <!-- ============ 定位 ============ -->
+  <section id="intro">
+    <h2>本篇定位</h2>
+    <p><b>前置</b>：Part1「一步数据流」（<code>step()</code> 的调用序）与「<code>execute_model</code> / <code>sample_tokens</code> 两阶段」。Part1 那句"异步调度时与下一步调度重叠"就是本篇展开的东西。</p>
+    <blockquote><b>一句话</b>：异步调度让<b>引擎侧的 CPU 工作</b>（调度、状态回写、detokenize 准备）<b>与设备侧的 forward 重叠</b>，办法是"<b>先按乐观假设调度下一步，不等这一步的采样结果落回 CPU</b>"。代价是引入一套占位符记账，以及若干特性不兼容。</blockquote>
+    <p><b>与 Part2 的分工</b>：Part2 统一按<b>同步调度</b>讲（<code>schedule → execute → update_from_output</code> 首尾相接）；异步调度的全部内容——欠条记账、稳态时间线、MTP 的两处回退——<b>集中在本篇</b>。Part2 只在三处留了指针，不做展开。</p>
+    <p class="small">代码口径：vLLM 0.14.0 <code>vllm/</code>、omni-npu <code>omni_npu/</code>。默认按单实例讲，PD 分离与多 DP 的差异指向 Part4。</p>
+  </section>
+
+  <!-- ============ 1 ============ -->
+  <section id="s1">
+    <span class="kicker">动机</span>
+    <h2>1　要解决的问题：同步调度的两段空等</h2>
+    <p>同步调度下，一步之内 host 与设备<b>严格轮替</b>：host 调度时设备闲着，设备计算时 host 停在那里等结果。<b>两段空等都是纯损失。</b></p>
+
+    <div class="dg">
+      <p class="cap">同步调度的一步：两条泳道共用同一时间轴（列宽非等比）</p>
+      <div class="gt"><span class="lb">host</span>
+        <div class="c cpu">sched N</div>
+        <div class="c bub" style="width:396px;min-width:396px">空等 <code style="background:none;color:inherit">event.synchronize()</code></div>
+        <div class="c cpu">upd N</div>
+        <div class="c cpu">sched N+1</div>
+      </div>
+      <div class="gt"><span class="lb">设备主计算流</span>
+        <div class="c bub">设备空等</div>
+        <div class="c dev" style="width:196px;min-width:196px">Forward N</div>
+        <div class="c dev">Sample N</div>
+        <div class="c cpy">D2H</div>
+        <div class="c bub" style="width:196px;min-width:196px">设备空等</div>
+      </div>
+      <div class="gt"><span class="lb"></span>
+        <div class="c gap" style="width:96px;min-width:96px"></div>
+        <div class="c" style="width:396px;min-width:396px;border:none;background:none;padding:0;justify-content:flex-end;font-size:12.5px;color:var(--accent)"><b>唯一的同步点</b> ▲</div>
+      </div>
+      <div class="gt"><span class="lb"></span>
+        <div class="c gap" style="width:396px;min-width:396px"></div>
+        <div class="c" style="width:296px;min-width:296px;border:none;background:none;justify-content:flex-start;font-size:12.5px;color:var(--npu)">↑ 搬 <code style="background:none;color:inherit">sampled_token_ids</code>，几百字节</div>
+      </div>
+      <p class="foot"><code>sched N</code> 一结束设备就接上 <code>Forward N</code>；host 随即进入空等，直到右侧那个对齐点——<b>整步唯一必然阻塞 host 的地方</b>。<br>
+      关键在于：host 空等期间<b>设备一直在算</b>。所以损失不是那几百字节的拷贝，而是<b>host 陪着一起停</b>——它本可以拿这段时间去调度下一步。</p>
+    </div>
+
+    <p><b>那它为什么非等不可？</b><code>schedule()</code> 自己只做一次减法（目标 − 游标），<b>压根不读 token 的值</b>。但同步实现下，<b>「目标」增长的唯一通路要经过 <code>update_from_output</code></b>——而那必须先拿到值。于是 schedule 被这条通路<b>间接</b>卡住了：</p>
+
+    <div class="dg">
+      <p class="cap">这次 D2H 卡住 <code>schedule(N+1)</code> 的路径</p>
+      <div class="chain">
+        <div class="st"><b>D2H</b><span class="s">token 值落回 CPU</span></div>
+        <div class="sep">→</div>
+        <div class="st"><b><code>update_from_output</code></b><span class="s">判停要看<b>值</b><br>纠偏要看<b>长度</b></span></div>
+        <div class="sep">→</div>
+        <div class="st k2"><b>追加进 <code>_all_token_ids</code></b><span class="s"><code>append_output_token_ids</code></span></div>
+        <div class="sep">→</div>
+        <div class="st k"><b>「目标」增长</b><span class="s"><code>num_tokens_with_spec</code> +1</span></div>
+        <div class="sep">→</div>
+        <div class="st k"><b><code>schedule(N+1)</code></b><span class="s">目标 − 游标 &gt; 0<br>才有 token 可调度</span></div>
+      </div>
+      <p class="foot"><b>卡点不是游标</b>——游标早在 <code>schedule(N)</code> 末尾就推过了（Part2·1.3）。卡的是<b>「目标」</b>：decode 请求的 <code>num_tokens</code> 只能靠 <code>update_from_output</code> 追加 token 才增长。目标不长，<code>目标 − 游标 = 0</code>，下一步<b>一个 token 都调度不出来</b>。</p>
+    </div>
+
+
+    <blockquote><b>思路</b>：既然 <code>schedule()</code> 本来就只要个数，那就<b>别再让「目标增长」绕道 <code>update_from_output</code></b>——先按乐观假设把目标顶上去、把下一步调度出去，「到底是哪几个」推后处理。<br>
+    落到实现上，正是拆开上面那条依赖的两半：<b>把「等」从主线程挪走</b>（2.3）＋ <b>在目标侧先记一笔欠条</b>（2.2）。<b>缺一不可</b>——只挪 D2H，调度仍要等目标增长；只记欠条，输出仍会堵住主线程。</blockquote>
+  </section>
+
+  <!-- ============ 2 ============ -->
+  <section id="s2">
+    <span class="kicker">总览</span>
+    <h2>2　三层配合：引擎、调度器、Worker</h2>
+    <p>异步调度不是单点改动，而是<b>引擎、调度器、Worker 三层各改一件事</b>，缺一层就不成立。三处改动都落在 Part1 那张「一步数据流」上——把它摊在这里，后面 2.1 / 2.2 / 2.3 不必再翻回去：</p>
+
+    <div class="dg">
+      <p class="cap">同步路径的一步（摘自 Part1·2.1），与异步调度的三处改动落点</p>
+      <div style="display:flex;flex-direction:column;gap:7px">
+        <div class="box" style="text-align:left;background:#f8fafc"><span class="s">① <b>API Server</b>：tokenize → <code>EngineCoreRequest</code>　—— ↓ ZMQ 第一跳 ↓ ——</span></div>
+        <div class="box hl" style="text-align:left">
+          <span class="t" style="font-size:16px">② EngineCore（<code>run_busy_loop</code> 每步循环）· <code>step()</code><span class="tag tag-p1">2.1　整个换成 step_with_batch_queue()</span></span>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+            <div class="box" style="text-align:left;background:#fff"><span class="s"><b>schedule()</b> → <code>SchedulerOutput</code>（跑谁 / 各几 token / KV 块）<span class="tag tag-p3">2.2　调度完就记一笔欠条</span></span></div>
+            <div class="box" style="text-align:left;background:#fff"><span class="s">↓ Executor 广播（共享内存 MessageQueue）　　↑ Worker 回传<span class="tag tag-p1">2.1　回传不当场收，记进 batch_queue</span></span></div>
+            <div class="box npucol" style="text-align:left"><span class="s"><b>③ Worker</b>：打平输入 → forward → 采样 → <code>ModelRunnerOutput</code><span class="tag tag-n">2.3　token 的值全程留在设备上</span></span></div>
+            <div class="box" style="text-align:left;background:#fff"><span class="s"><b>update_from_output</b> → 推进状态 / 释放 KV / 出 <code>EngineCoreOutputs</code><span class="tag tag-p1">2.1　挪到下一次调用才做</span></span></div>
+          </div>
+        </div>
+        <div class="box" style="text-align:left;background:#f8fafc"><span class="s">—— ↓ ZMQ 回程 ↓ ——　① <b>API Server</b>：detokenize → <code>RequestOutput</code></span></div>
+      </div>
+      <p class="foot"><b>三层是一条「缺一不可」的因果链</b>：<b>2.1</b> 让引擎可以提前调度下一步 → 但调度得知道各请求现在有多少 token → <b>2.2</b> 用欠条顶上 → 但 forward 要真实的 token id 才能算 → <b>2.3</b> 让 token 的值留在设备上。<br>
+      <b>主线一句话</b>：CPU 只管「有几个 token」，不管「是哪几个」；值在设备上流转，搬回 CPU 只为 detokenize 与判停，可以慢一步。</p>
+    </div>
+  </section>
+
+  <!-- ============ 3 ============ -->
+  <section id="s21">
+    <span class="kicker">引擎侧</span>
+    <h3>2.1　引擎侧：让两个 step 同时在跑</h3>
+    <p>开关一开，一条链就串起来了：<code>Executor.max_concurrent_batches</code> 从「PP 级数」改成返回 <b>2</b> → <code>batch_queue_size = 2</code> → <code>batch_queue</code> 非空 → <b>主循环换函数</b>，<code>step()</code> 变成 <code>step_with_batch_queue()</code>。</p>
+
+    <p>换函数换掉的是一件事：<b>EngineCore 调完 <code>sample_tokens</code></b>（Executor 上的 RPC 存根，只负责把方法名广播出去；真正的采样在 worker 进程里跑）<b>后不再原地等它的返回值</b>，而是把「这一步的输出<b>待取</b>」记进 <code>batch_queue</code>（代码里就是一个 <code>Future[ModelRunnerOutput]</code>），留到下一轮再收。回到上面那张图看——<b><code>batch_queue</code> 就是缓存「Worker 回传」那条箭头的地方</b>：同步路径下「广播 ↓」与「回传 ↑」在<b>同一次 <code>step()</code> 调用内</b>首尾相接，回传一到就被 <code>update_from_output</code> 吃掉，不需要任何容器；异步下这条箭头被<b>挂起</b>，<code>update_from_output</code> 挪到<b>下一次调用</b>才做。于是主循环的节奏变成：</p>
+
+    <div class="dg">
+      <p class="cap"><code>batch_queue</code>（size=2）的两个阶段：先注满，再进入"发一批、收一批"的稳态<br><span class="small" style="font-weight:400">同列＝同一次调用内的先后（列宽非等比）</span></p>
+      <div class="gt"><span class="lb"></span>
+        <div class="c hd brk" style="width:196px;min-width:196px">第 1 次调用</div>
+        <div class="c hd brk" style="width:396px;min-width:396px">第 2 次调用</div>
+        <div class="c hd brk" style="width:396px;min-width:396px">第 3 次调用（＝稳态）</div>
+      </div>
+      <div class="gt"><span class="lb">EngineCore</span>
+        <div class="c cpu" style="width:196px;min-width:196px">sched N → 非阻塞派发</div>
+        <div class="c cpu" style="width:196px;min-width:196px">sched N+1 → 非阻塞派发</div>
+        <div class="c idle">等 Out N</div>
+        <div class="c cpu">upd N</div>
+        <div class="c cpu" style="width:196px;min-width:196px">sched N+2 → 非阻塞派发</div>
+        <div class="c idle">等 Out N+1</div>
+        <div class="c cpu">upd N+1</div>
+      </div>
+      <div class="gt"><span class="lb"><code>batch_queue</code> 占用</span>
+        <div class="c" style="width:196px;min-width:196px;border-style:dashed">1 / 2　未满</div>
+        <div class="c bub" style="width:196px;min-width:196px">2 / 2　已满</div>
+        <div class="c gap"></div>
+        <div class="c" style="border-style:dashed">pop → 1 / 2</div>
+        <div class="c bub" style="width:196px;min-width:196px">2 / 2　已满</div>
+        <div class="c gap"></div>
+        <div class="c" style="border-style:dashed">pop → 1 / 2</div>
+      </div>
+      <div class="gt"><span class="lb" style="color:var(--accent)">这次调用的返回值</span>
+        <div class="c" style="width:196px;min-width:196px;border:none;background:none;font-size:12.5px;color:var(--accent)"><b>空手返回</b>（None）</div>
+        <div class="c" style="width:296px;min-width:296px;border:none;background:none"></div>
+        <div class="c" style="width:296px;min-width:296px;border:none;background:none;justify-content:flex-start;font-size:12.5px;color:var(--accent)">↑ <code style="background:none;color:inherit">upd N</code> 产出 <code style="background:none;color:inherit">EngineCoreOutputs</code>，随返回值送出</div>
+      </div>
+      <p class="foot"><b>「对账」= 三个动作</b>：从 <code>batch_queue</code> pop 出最老那一批 → 阻塞等它的输出 → <code>update_from_output</code> 回写（第 4 节图里 EngineCore 泳道的「阻塞等 Out N」+「↩ upd N」两格）。<br>
+      <b>两种「输出」别混</b>：EngineCore 等的是 worker 回传的 <code>ModelRunnerOutput</code>（第 4 节的 <code>Out N</code>，与 <code>MTP N</code> 并行落地）；而这里送出的是 <code>upd N</code> 产出的 <code>EngineCoreOutputs</code>——前者是后者的输入。<br>
+      <b>「空手返回」= 这次不做对账，只把队列填上</b>——<code>step_with_batch_queue()</code> 的返回值第一项直接是 <code>None</code>（没有输出要送 API Server），主循环立刻再调一次。<b>它只发生在注满阶段</b>：稳态下派发完队列就满了，每次调用都必须对账、也就都有输出——所以第 N 步的输出是在<b>第 N+1 次调用</b>里送出的（wall-clock 时刻与同步路径一致，只是记在了另一次调用名下）。<br>
+      它还带一个条件：<b>队尾那批已经算完时 CPU 不抢跑</b>，直接转去对账——避免设备已经空出来了、CPU 还在往前排队。</p>
+    </div>
+
+    <blockquote><b>为什么恰好是 2，而不是更多</b>：两次 <code>schedule()</code> 之间隔着一次"等输出 + 对账"，于是<b>任何时刻最多只有 1 个 step 未对账</b>。<b>乐观只乐观一步</b>——这就是后面第 3 节的回退永远只需覆盖<b>一个</b> <code>num_rejected</code>、不会累积成"回退 n 步"状态机的根本原因。<code>batch_queue_size = 2</code> 把这个数直接钉死了。</blockquote>
+  </section>
+
+  <!-- ============ 4 ============ -->
+  <section id="s22">
+    <span class="kicker acc">调度器侧</span>
+    <h3>2.2　调度器侧：<code>AsyncScheduler</code> 的"欠条"记账</h3>
+    <p>2.1 让引擎"可以"提前调度下一步，但没解决"<b>凭什么调度</b>"——这是异步调度的记账基础，也是它引入的<b>唯一一个新概念</b>。</p>
+    <div class="dg">
+      <p class="cap">核心矛盾：调度第 N+1 步需要"各请求有多少 token"，而第 N 步的 token 还在设备上</p>
+      <div class="rowf">
+        <div class="box accent" style="flex:1"><span class="t">要什么</span><span class="s">调度第 N+1 步 → 需要各请求<b>现在有多少 token</b><br>（算 <code>num_new_tokens</code>、分 KV、扣预算）</span></div>
+        <div class="arr">✗</div>
+        <div class="box" style="flex:1"><span class="t">有什么</span><span class="s">第 N 步的 token <b>还没落回 CPU</b><br>（值还在设备上，见2.3）</span></div>
+      </div>
+      <div class="arrd">↓ 关键观察</div>
+      <div class="box hl"><span class="t">调度只需要"<b>几个</b>"，不需要"<b>是哪几个</b>"</span><span class="s">→ 那就先<b>乐观记一笔欠条</b>，把个数补上，值留着以后再说</span></div>
+    </div>
+
+    <p>落地就是换一个调度器子类 <code>AsyncScheduler</code>（按 <code>async_scheduling</code> 选类，全文仅 67 行）。它把账记在 <b><code>schedule()</code> 的最后一步 <code>_update_after_schedule</code></b> 上：先推游标——对本步所有被调度请求统一 <code>num_computed_tokens += num_scheduled_token</code>；再对<b>其中会产出新 token 的那些</b>多记一笔欠条。两笔都只改 Scheduler 内存里的 <code>Request</code>，<b>不进已经定型的 <code>SchedulerOutput</code></b>。</p>
+
+<pre><code># 调度后：本步一定会产出 1 + num_spec_tokens 个 token —— 先记上
+if request.num_computed_tokens == (request.num_tokens
+                                   + request.num_output_placeholders
+                                   + cur_num_spec_tokens):
+    request.num_output_placeholders += 1 + cur_num_spec_tokens
+    request.spec_token_ids = [-1] * self.num_spec_tokens   # 占位，真值由 worker 侧填</code></pre>
+
+<pre><code># 真 token 回来时冲销
+request.num_output_placeholders -= len(new_token_ids)
+assert request.num_output_placeholders &gt;= 0</code></pre>
+
+    <p>所以 <code>num_output_placeholders</code> 的语义是：<b>"已经按它调度过、但还不知道具体是什么"的 token 数</b>。同步调度下它恒为 0——这正是 Part2 那句括号说明的由来。</p>
+
+    <div class="dg">
+      <p class="cap">一个请求的 token 账：欠条把"已知段"与"已调度但值未知段"分开</p>
+      <div class="buf">
+        <div class="c known">已知 token（值已落回 CPU）<br>= num_computed_tokens − num_output_placeholders</div>
+        <div class="c ph">欠条段<br>num_output_placeholders</div>
+      </div>
+      <div class="marks">
+        <span style="flex:5">↑ <b>prefix cache 只能缓存到这里</b>（2.2 ①）</span>
+        <span style="flex:2">↑ 已按它分了 KV、扣了预算<br>但内容未知，缓存与判停都得让路</span>
+      </div>
+      <p class="foot">调度器靠右边这段的<b>长度</b>推进 KV 分配与 token 预算，全程不需要它的<b>内容</b>。</p>
+    </div>
+
+    <div class="impl-head">两处必须为"值未知"让路</div>
+    <p>欠条段没有内容，于是凡是<b>依赖 token 内容</b>的机制都得退到已知段为止：</p>
+    <table>
+      <thead><tr><th>　</th><th>让路做法</th><th>为什么</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><b>① prefix cache</b></td>
+          <td>只缓存到 <code>num_computed_tokens − num_output_placeholders</code></td>
+          <td>block hash 要<b>按 token 内容</b>算；欠条段还没有内容，进不了缓存 → 命中率会略降</td>
+        </tr>
+        <tr>
+          <td><b>② 判停</b></td>
+          <td>要看 token <b>值</b>的停止条件（EOS / <code>stop_token_ids</code> / stop 串）<b>必然多跑一步</b>，那一步的产出作废</td>
+          <td><code>schedule(N+1)</code> 时第 N 步的值还没回来，判不出停没停，只能照排照跑；等 <code>upd(N)</code> 发现停了，请求已被释放，第 N+1 步的产出就没人认领了。<br><span class="small"><code>max_tokens</code> 是例外——它只看个数，所以 RUNNING 扫描一进门就能<b>提前跳过</b>，不浪费这一步。</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <blockquote>把两条合起来看：<b>欠条只在"计数"这个维度上可信</b>——凡是要读 token 内容的地方（缓存、判停），都必须回退到已知段的边界上。这是 <code>num_output_placeholders</code> 带来的全部复杂度所在。<br>
+    其中「多跑一步」是异步调度<b>最容易被忽略的一笔固定开销</b>，而且<b>与 MTP 无关</b>——换来的是每步都省下的 CPU 气泡。</blockquote>
+  </section>
+
+  <!-- ============ 5 ============ -->
+  <section id="s23">
+    <span class="kicker npu">Worker 侧</span>
+    <h3>2.3　Worker 侧：token 值全程留在设备上</h3>
+    <p>调度器可以只认个数，但 forward 必须拿到真实的 token id。Worker 侧两件事把这个缺口补上，且<b>都不占用主线程</b>。</p>
+
+    <div class="impl-head"><span class="n">a</span>采样结果延迟搬回 CPU，等待交给独立线程</div>
+    <p>采样照旧在设备上完成，但 <code>sample_tokens</code> 返回的不再是现成的 <code>ModelRunnerOutput</code>：它只在<b>独立 copy stream</b> 上发起一次非阻塞 D2H、记一个 event，<b>不 synchronize</b>。主线程把这个半成品甩进队列就走，「等 event 落地、填好 token、回包」全部交给一条专门的输出线程。</p>
+
+    <div class="dg">
+      <p class="cap">Worker 进程内的两条线程</p>
+      <div class="rowf">
+        <div class="box hl" style="flex:1.1"><span class="t">Worker 主线程</span><span class="s">forward → 采样 → 发起 D2H → 甩进队列<br><b>立刻回去接第 N+1 步的 forward</b></span></div>
+        <div class="arr">→</div>
+        <div class="box npucol" style="flex:1"><span class="t">输出线程</span><span class="s"><b>阻塞</b>等 D2H event → 把 token 填进 <code>ModelRunnerOutput</code><br>→ 回包给 EngineCore</span></div>
+      </div>
+      <p class="foot"><b>等待并没有消失</b>——token 的值必须先算出来才能搬，这是真依赖，总得有人等。改掉的只是<b>谁等</b>：从「设备一停 forward 就得停」的主线程，挪到一条空转无代价的线程上。</p>
+    </div>
+
+    <div class="impl-head"><span class="n">b</span>下一步的 <code>input_ids</code> 在设备上就地补</div>
+    <p>这是最容易忽略、也最关键的一环。调度器不知道上一步的 token，所以它发过来的 <code>input_ids_cpu</code> 里，<b>那些 decode 请求的位置是空的</b>。Worker 用上一步留在设备上的 <code>prev_sampled_token_ids</code>，直接在设备上把这些空洞填掉（<code>_prepare_input_ids</code>）：</p>
+
+    <div class="dg">
+      <p class="cap"><code>_prepare_input_ids</code> 补洞：decode 位置的值从设备张量取，不经 CPU<br><span class="small" style="font-weight:400">图示<b>不开 MTP</b>：一条 decode（本步只算 1 个 token）＋ 一条 prefill；decode 段按 decode-first 重排排在队首（Part2·2.2）</span></p>
+      <div class="tkrow">
+        <div class="tklab">调度器给的 <code>input_ids_cpu</code></div>
+        <div class="tk hole">▢</div>
+        <div class="tk kept">t</div><div class="tk kept">t</div><div class="tk kept">t</div>
+        <div class="tkend">▢ = decode 位置<b>为空</b>（值还在设备上）　t = prompt token（CPU 本来就有）</div>
+      </div>
+      <div class="tkrow">
+        <div class="tklab">上一步留在设备的 <code>prev_sampled_token_ids</code></div>
+        <div class="tk dev">x</div>
+        <div class="tk gap" style="border:none;background:none;width:52px;min-width:52px"></div>
+        <div class="tk gap" style="border:none;background:none;width:52px;min-width:52px"></div>
+        <div class="tk gap" style="border:none;background:none;width:52px;min-width:52px"></div>
+        <div class="tkend">设备张量，<b>从未搬到 CPU</b></div>
+      </div>
+      <div class="tkrow"><div class="tklab">↓ 在设备上填</div><div class="tkend" style="padding-left:0">batch 组成与上一步一致 → <b>一次 slice copy</b>（快路径）；有请求增删 / 换位 → 按 <code>prev_req_id_to_index</code> 做 <b>scatter</b></div></div>
+      <div class="tkrow">
+        <div class="tklab">喂进模型的 <code>input_ids</code></div>
+        <div class="tk fill">x</div>
+        <div class="tk kept">t</div><div class="tk kept">t</div><div class="tk kept">t</div>
+        <div class="tkend">完整、正确，<b>且全程没有一次 D2H → H2D 往返</b></div>
+      </div>
+    </div>
+
+    <blockquote><b>这就是异步调度真正的关窍</b>：token 的值<b>全程留在设备上流转</b>，CPU 只管"有几个 token"，不管"是哪几个"。搬回 CPU 只为了 detokenize 和判停，<b>所以可以慢一步</b>。2.2 的欠条之所以够用，全靠这一节兜住了正确性。</blockquote>
+    <p class="small"><b>开 MTP 时每个 decode 请求占 <code>1+k</code> 个连续空洞</b>——1 个 bonus token（上一步采样的）＋ <code>k</code> 个草稿，值同样全在设备上，同样在设备上 scatter 进 <code>input_ids</code>，不走 CPU。</p>
+  </section>
+
+  <!-- ============ 3 ============ -->
+  <section id="s3">
+    <span class="kicker acc">MTP 叠加</span>
+    <h2>3　叠加 MTP：被拒时的回退落在哪</h2>
+    <p>异步调度按"draft token <b>全部被接受</b>"乐观调度下一步，而 MTP 的草稿可能被拒。要回答的问题是：这个回退具体在哪执行？是不是 <code>schedule(N+1)</code> 之后要额外插一个回退步骤？</p>
+    <blockquote><b>结论</b>：<b>没有额外步骤</b>。回退寄生在两处<b>本来就要跑</b>的代码里，而且是<b>两套账各自减一次</b>——Worker 一份、Scheduler 一份，互不依赖。整个"回退"只落在一个标量 <code>num_computed_tokens</code> 上：<b>没有 rollback 状态机、不重调度、不丢弃已派发的 batch</b>。</blockquote>
+  </section>
+
+  <section id="s31">
+    <h3>3.1　先把顺序钉死，再看两处回退</h3>
+    <div class="dg">
+      <p class="cap">异步下一次 <code>step_with_batch_queue</code> 调用的实际次序</p>
+      <div class="chain">
+        <div class="st k"><b>schedule(N+1)</b><span class="s">乐观推进游标<br>记欠条</span></div>
+        <div class="sep">→</div>
+        <div class="st"><b>派发 execute_model(N+1)</b><span class="s">非阻塞，微秒级<br>共享内存投递</span></div>
+        <div class="sep">→</div>
+        <div class="st"><b>pop 出第 N 批</b><span class="s">阻塞等 Out N</span></div>
+        <div class="sep">→</div>
+        <div class="st k2"><b>update_from_output(N)</b><span class="s">← 账本回退在这里</span></div>
+      </div>
+      <p class="foot"><code>update_from_output(N)</code> 里那句"游标回退"<b>确实排在 <code>schedule(N+1)</code> 之后</b>，所以它<b>管不到</b>第 N+1 步。管得到的是 Worker 那一次。</p>
+    </div>
+
+    <div class="impl-head"><span class="n">1</span>回退一：Worker 侧，在第 N+1 步 forward 的<b>输入准备</b>里（保正确性的那次）</div>
+    <p><code>execute_model(N+1)</code> 的第一件事是 <code>_update_states(scheduler_output_{N+1})</code>，它在 <code>_prepare_inputs</code> <b>之前</b>就把游标改对：</p>
+
+<pre><code># 接受个数走一条专用小拷贝流：排在 drafter forward 之前入队、载荷只是个几十字节的 int
+# tensor，所以 MTP N 还在跑它就落地了 —— 这里只 event.synchronize() 这一个小 event
+valid_sampled_token_count = self._get_valid_sampled_token_count()
+...
+num_accepted        = valid_sampled_token_count[prev_req_index] - 1
+num_rejected        = req_state.prev_num_draft_len - num_accepted
+num_computed_tokens -= num_rejected                                 # ← 回退就是这一行
+req_state.num_computed_tokens = num_computed_tokens
+self.input_batch.num_computed_tokens_cpu[req_index] = num_computed_tokens</code></pre>
+
+    <p>调度器发来的 <code>num_computed_tokens</code> 是<b>乐观值</b>（<code>C + 1 + k</code>）。Worker 拿它去建 <code>positions</code> / <code>seq_lens</code> / <code>slot_mapping</code> / <code>attn_metadata</code> <b>之前</b>先扣掉被拒数 → <b>forward N+1 算的是正确位置</b>。</p>
+    <p class="small"><code>prev_num_draft_len</code> 是上一步实际调度给它的草稿数；等于 0 时整段跳过——第一步与 prefill 步都不需要回退。</p>
+
+    <div class="impl-head"><span class="n">2</span>回退二：Scheduler 侧，在 <code>update_from_output(N)</code> 里（只是账本对齐）</div>
+<pre><code>num_accepted = len(generated_token_ids) - 1
+num_rejected = num_draft_tokens - num_accepted
+request.num_computed_tokens     -= num_rejected   # 游标
+request.num_output_placeholders -= num_rejected   # 欠条（2.2）</code></pre>
+    <p>它排在 <code>schedule(N+1)</code> 之后，<b>对第 N+1 步已做出的决策毫无影响</b>，只影响 <code>schedule(N+2)</code> 起的 KV 分配、判停、prefix cache 上界。</p>
+    <p><b>注意欠条那一行</b>：2.2 的 <code>-= len(new_token_ids)</code> 冲销的是"<b>真回来的 token</b>"，这里的 <code>-= num_rejected</code> 冲销的是"<b>预支了但没兑现的</b>"。两者相加，才把 <code>+= 1 + cur_num_spec_tokens</code> 那笔预支清干净。</p>
+  </section>
+
+  <section id="s32">
+    <h3>3.2　为什么 <code>schedule(N+1)</code> 不用重做</h3>
+    <p>这是整套设计最省事的地方：<b>拒绝几个，不改变"下一步算几个 token"，只改变"从哪个位置开始算"</b>。第 N+1 步永远是 1 个 bonus token + <code>k</code> 个新草稿，与接受数无关。</p>
+    <table>
+      <thead><tr><th><code>schedule(N+1)</code> 乐观决定的东西</th><th>被拒后要不要改</th><th>为什么</th></tr></thead>
+      <tbody>
+        <tr><td><code>num_scheduled_tokens = 1 + k</code></td><td><b>不用</b></td><td>验证 batch 的<b>形状</b>与接受数无关</td></tr>
+        <tr><td><code>positions</code> / <code>seq_lens</code> / <code>slot_mapping</code> 的<b>起点</b></td><td><b>要改</b></td><td>Worker 在 <code>_update_states</code> 里扣 <code>num_rejected</code>（回退一）</td></tr>
+        <tr><td>KV slot 分配</td><td>不用</td><td>多分的槽位<b>没被写入</b>；游标回退后下一步原地覆盖复用</td></tr>
+        <tr><td><code>token_budget</code> / <code>max_num_seqs</code> 记账</td><td>不用</td><td>偏乐观而已，无正确性影响</td></tr>
+        <tr><td>prefix cache</td><td>不用</td><td>本来就只缓存到 <code>num_computed_tokens − num_output_placeholders</code>（2.2 ①）</td></tr>
+      </tbody>
+    </table>
+    <blockquote><b>一句话记忆</b>：<code>num_scheduled_tokens</code> 是对的，只有<b>起点</b>错了；把起点减掉 <code>num_rejected</code> 就全对了——所以回退是<b>一次标量减法</b>，不是一个步骤。</blockquote>
+  </section>
+
+  <!-- ============ 4 ============ -->
+  <section id="s4">
+    <span class="kicker">全景</span>
+    <h2>4　稳态时间线：五条泳道</h2>
+    <p>把第 4～7 节合起来看。下图是流水线注满后<b>不断重复的一个周期</b>（开 MTP 的稳态）：</p>
+
+    <div class="dg">
+      <p class="cap">异步调度 + MTP 的稳态时间线（同列＝同时发生、列宽非等比；<span style="color:var(--accent)">↩</span> = 游标回退）</p>
+      <div class="gt"><span class="lb"></span>
+        <div class="c hd brk" style="width:296px;min-width:296px">设备第 N 步</div>
+        <div class="c hd brk" style="width:296px;min-width:296px">设备第 N+1 步</div>
+      </div>
+      <div class="gt"><span class="lb">EngineCore（CPU）</span>
+        <div class="c cpu">sched N+1</div>
+        <div class="c idle" style="width:196px;min-width:196px">阻塞等 Out N</div>
+        <div class="c rb">↩ upd N</div>
+        <div class="c cpu">sched N+2</div>
+        <div class="c idle">等 Out N+1</div>
+      </div>
+      <div class="gt"><span class="lb">Worker 输入准备</span>
+        <div class="c gap" style="width:196px;min-width:196px"></div>
+        <div class="c rb">↩ Input N+1</div>
+        <div class="c gap" style="width:196px;min-width:196px"></div>
+        <div class="c rb">↩ Input N+2</div>
+      </div>
+      <div class="gt"><span class="lb">设备主计算流</span>
+        <div class="c dev">Forward N</div>
+        <div class="c dev">Sample N</div>
+        <div class="c dev">MTP N</div>
+        <div class="c dev">Forward N+1</div>
+        <div class="c dev">Sample N+1</div>
+        <div class="c dev">MTP N+1</div>
+      </div>
+      <div class="gt"><span class="lb">接受数拷贝流</span>
+        <div class="c gap" style="width:196px;min-width:196px"></div>
+        <div class="c cpy">count N</div>
+        <div class="c gap" style="width:196px;min-width:196px"></div>
+        <div class="c cpy">count N+1</div>
+      </div>
+      <div class="gt"><span class="lb">异步输出流</span>
+        <div class="c gap" style="width:196px;min-width:196px"></div>
+        <div class="c cpy">Out N</div>
+        <div class="c gap" style="width:196px;min-width:196px"></div>
+        <div class="c cpy">Out N+1</div>
+      </div>
+      <p class="foot"><b>一次引擎调用（稳态）</b> = <code>sched(N+1)</code> → 非阻塞派发 → 阻塞等 <code>Out N</code> → <code>upd(N)</code>；下一次调用才轮到 <code>sched(N+2)</code>。<b>对照第 1 节的同步图</b>：CPU 那两段红色空等已经被 <code>Forward N</code> 填满。</p>
+    </div>
+
+    <table>
+      <thead><tr><th>泳道</th><th>它负责什么</th></tr></thead>
+      <tbody>
+        <tr><td><b>EngineCore（CPU）</b></td><td>每周期"发一批、收一批"：<code>schedule</code> → 非阻塞派发 → 阻塞等输出 → <code>update_from_output</code></td></tr>
+        <tr><td><b>Worker 输入准备</b></td><td>按实际接受数<b>修正游标</b>，再建 <code>positions</code> / <code>seq_lens</code> / <code>slot_mapping</code>（<code>_update_states</code> → <code>_prepare_inputs</code>）</td></tr>
+        <tr><td><b>设备主计算流</b></td><td>连轴跑 Forward → Sample → MTP，<b>不为 CPU 停</b></td></tr>
+        <tr><td><b>接受数拷贝流</b></td><td>只回传"接受了几个"这一个小整数，供下一步修正游标（3.1）</td></tr>
+        <tr><td><b>异步输出流</b></td><td>回传完整 token id，供判停与 detokenize，<b>可以慢一步</b>（2.3 a）</td></tr>
+      </tbody>
+    </table>
+
+    <p><b>三条读图要点</b>：</p>
+    <ul>
+      <li><b><code>sched N+1</code> 与 <code>Forward N</code> 同列——调度不等设备</b>：门槛只是 <code>batch_queue</code> 未满（size=2），派发本身是一次共享内存投递、微秒级。代价是它不知道第 N 步接受了几个，只能按"draft 全被接受"记欠条（2.2）。</li>
+      <li><b><span style="color:var(--accent)">↩ Input N+1</span> 与 <code>MTP N</code> 同列——保正确性的那次回退</b>：<code>count N</code> 走独立拷贝流、<b>早于 MTP 落地</b>，Worker 得以在建输入张量前把游标减回真实值，<code>Forward N+1</code> 才算在对的位置上。<b>这是异步链路上唯一残留的硬依赖。</b></li>
+      <li><b><span style="color:var(--accent)">↩ upd N</span> 只对账本</b>：同一个 <code>num_rejected</code> 在 CPU 侧再减一次（游标 + 欠条），最早影响 <code>sched N+2</code>，管不到已派发的第 N+1 步。<b>不会重复扣</b>——两处减的是各自的副本（Worker 减 <code>req_state</code>、Scheduler 减 <code>request</code>），各减一次、永远对得上。</li>
+    </ul>
+
+    <blockquote>三条设备流的分工，正好对应"CPU 只管有几个 token、不管是哪几个"这条主线：<b>主计算流</b>跑真活；<b>接受数拷贝流</b>只回传一个小整数、喂给下一步的输入准备（唯一硬依赖，压到最小）；<b>异步输出流</b>回传完整 token id，慢一步无所谓。</blockquote>
+  </section>
+
+  <section id="s5">
+    <span class="kicker acc">副作用</span>
+    <h2>5　一处连带副作用：DP 同步被迫改走 CPU</h2>
+  </section>
+
+  <section id="s51">
+    <h3>5.1　为什么必须有这一步</h3>
+    <p>DP（数据并行）本意是各 rank 独立跑不同请求、互不通信。但以下三处会<b>打穿 DP 边界</b>，逼各 rank 必须步调一致：</p>
+    <ul>
+      <li><b>MoE 专家并行（EP）的 all-to-all</b>：开 EP 后 MoE 每层要把 token 按路由 all-to-all 分发到各 rank 的专家再收回，<b>要求各 rank 进 all-to-all 的 token 数一致</b>。</li>
+      <li><b>lm_head 的 DP 切分</b>：vocab 很大，按 DP 维切 vocab 后算 logits 要 allgather + all-to-all——同样跨 DP。</li>
+      <li><b>整步 lockstep</b>：集合通信要求所有参与方到齐，只要有一个 rank 缺席，其余 rank 就会<b>永久挂起</b>。</li>
+    </ul>
+    <p>而各 rank <b>各自独立调度</b>，每步的 <code>num_tokens</code> 天然不同。于是每次 forward <b>之前</b>先做一趟小 all_reduce 换取全局视野，按两条规则得出统一决策：<b><code>num_tokens</code> 取全局 max</b>（谁多按谁来，短的 pad 上去）、<b><code>cudagraph_mode</code> 取全局 min</b>（有一个 rank 走不了图，全体降级 eager）。</p>
+
+    <div class="dg">
+      <p class="cap">一次求和 all_reduce 换来全局视野：<code>(5, dp_size)</code> 的 int32 张量，各 rank 只填自己那一列<br><span class="small" style="font-weight:400">例：DP=2，rank0 纯 decode 命中 FULL 图，rank1 来了个 prefill 混排</span></p>
+      <div class="rowf" style="align-items:center">
+        <table class="mtx">
+          <tr><th class="rl">行</th><th>rank0</th><th>rank1</th></tr>
+          <tr><th class="rl">1　pad 后 token 数</th><td class="ok">4</td><td class="zero">0</td></tr>
+          <tr><th class="rl">3　是否想 DP pad</th><td class="ok">1</td><td class="zero">0</td></tr>
+          <tr><th class="rl">4　本 rank 的图模式</th><td class="ok">FULL</td><td class="zero">0</td></tr>
+        </table>
+        <div class="arr" style="padding:0 8px">→</div>
+        <table class="mtx">
+          <tr><th class="rl">行</th><th>rank0</th><th>rank1</th><th>后处理</th></tr>
+          <tr><th class="rl">1　pad 后 token 数</th><td>4</td><td>300</td><td><b>max = 300</b></td></tr>
+          <tr><th class="rl">3　是否想 DP pad</th><td>1</td><td>1</td><td><code>all(==1)</code></td></tr>
+          <tr><th class="rl">4　图模式</th><td>FULL</td><td>NONE</td><td><b>min = NONE</b></td></tr>
+        </table>
+      </div>
+      <p class="foot">结论三个：<code>should_dp_pad</code>（第 3 行全为 1）、<code>num_tokens_after_padding</code> = <b>300</b>（第 1 行取 max，rank0 被 pad 上去）、<code>synced_cudagraph_mode</code> = <b>NONE</b>（第 4 行取 min，<b>rank0 的 decode 图也用不成了</b>）。<br>
+      <span class="small">另两行（未 padding token 数、另一路执行开关）只在微批场景用到；载荷合计 <code>5 × dp_size</code> 个 int32，dp=16 时 320 字节。</span></p>
+    </div>
+
+  </section>
+
+  <section id="s52">
+    <h3>5.2　异步调度把它撤到了 CPU：因为一个假依赖</h3>
+    <p><b>开异步调度会把这趟 all_reduce 从设备通信域自动改走 CPU</b>——仅当用户没有显式指定时才自动翻：</p>
+
+<pre><code># config/vllm.py —— 用户没显式指定时，跟着 async_scheduling 自动翻
+if disable_nccl_for_dp_synchronization is None:
+    disable_nccl_for_dp_synchronization = async_scheduling
+
+# dp_utils.py::_get_device_and_group —— 翻成 True 后改走 gloo
+# 注释原文：把这个张量从 GPU 搬到 CPU 会引入一个 GPU sync point，
+#          可能损害开了异步调度的 vllm 的性能
+if disable_nccl_for_dp_synchronization:
+    device, group = "cpu", get_dp_group().cpu_group</code></pre>
+
+    <p><b>为什么结果非得读回 host</b>：<code>max</code> / <code>min</code> 本身是在设备上算的，逼出同步的是随后的 <code>.item()</code>——而它非做不可，因为这三个结果都要当 <b>Python 的控制流条件</b>用：pad 到多少、<b>选哪一张捕获图</b>、走图还是 eager。设备张量驱动不了 Python 的 <code>if</code>。</p>
+
+    <p><b>而这次回读的代价和前面同一个形状——在流上的排队顺序</b>：那个 D2H 同样挂在主计算流上，那里正排着<b>上一步</b>的工作：</p>
+
+    <div class="dg">
+      <p class="cap">DP 同步在一步之内的位置：被两头夹死，而它等的 forward N 是「假依赖」</p>
+      <div class="gt"><span class="lb" style="color:var(--accent);font-size:12.5px">位置被夹死</span>
+        <div class="c gap" style="width:196px;min-width:196px"></div>
+        <div class="c" style="width:500px;min-width:500px;border:none;background:none;padding:0;justify-content:space-between;font-size:12.5px;color:var(--accent);line-height:1.25">
+          <span>▼ 必须在 <code style="background:none;color:inherit">sched(N+1)</code> <b>之后</b><br>——要它的 token 数才能填表</span>
+          <span style="text-align:right">必须在 launch <b>之前</b> ▼<br>——forward 要知道形状才能发</span>
+        </div>
+      </div>
+      <div class="gt"><span class="lb">host</span>
+        <div class="c cpu">sched N+1</div>
+        <div class="c cpu" style="font-size:12px">算 5 个数</div>
+        <div class="c bub" style="width:396px;min-width:396px">阻塞等 DP 同步的结果</div>
+        <div class="c cpu" style="font-size:12px">定形状 / 选图</div>
+        <div class="c cpu" style="font-size:12px">launch fwd N+1</div>
+      </div>
+      <div class="gt"><span class="lb">设备主计算流</span>
+        <div class="c dev" style="width:396px;min-width:396px">上一步的 Forward N ── Sample N（还在跑）</div>
+        <div class="c cpy">all_reduce</div>
+        <div class="c bub">D2H</div>
+        <div class="c gap" style="width:196px;min-width:196px"></div>
+      </div>
+      <div class="gt"><span class="lb"></span>
+        <div class="c gap" style="width:400px;min-width:400px"></div>
+        <div class="c" style="width:396px;min-width:396px;border:none;background:none;justify-content:flex-start;font-size:12.5px;color:#64748b;line-height:1.25">↑ 载荷是 host 刚算好的 5 个整数，<b>与 forward N 的输出无关</b><br>&nbsp;&nbsp;&nbsp;只是排进了同一条流的队尾 → <b>假依赖</b></div>
+      </div>
+      <p class="foot">host 并不需要 forward N 的任何结果，它只是<b>那个几百字节的 D2H 插在了 forward N 后面</b>——流是 FIFO，要读它就得等整条队列排到它。于是「两个 step 同时在跑」退化成串行，<b>异步调度等于白开</b>。这就是上面那句「GPU sync point 害异步调度」的真正含义。<br>
+      <b>正因为是假依赖，换条路就能真拆开</b>——如果这里是真依赖，换流就会算错。</p>
+    </div>
+
+  </section>
+
+  <section id="s53">
+    <h3>5.3　两条拆法：撤离设备，或换条流</h3>
+    <div class="dg lbw">
+      <p class="cap">同一趟 320 字节的 all_reduce，两种拆法</p>
+
+      <div class="gt"><span class="lb" style="color:var(--brand)"><b>vLLM</b><br><span class="small" style="font-weight:400">gloo，异步调度下的默认</span></span>
+        <div class="c dev" style="width:296px;min-width:296px">上一步的 Forward N ── Sample N</div>
+        <div class="c" style="width:196px;min-width:196px;border-style:dashed;border-color:#cbd5e1;color:#94a3b8">不碰设备，无排队</div>
+      </div>
+      <div class="gt"><span class="lb">host</span>
+        <div class="c bub" style="width:296px;min-width:296px">16-rank TCP gloo all_reduce（阻塞）</div>
+        <div class="c cpu" style="width:196px;min-width:196px">拿到结果</div>
+      </div>
+      <p class="foot" style="margin:6px 0 14px"><b>躲开了序列化，但没让延迟变小。</b>三笔新开销：① TCP + 内核网络栈延迟，<b>随 <code>dp_size</code> 增长</b>（dp=16 这种规模正是最坏点）；② <b>16 路 host barrier</b>——每个 rank 的 CPU 线程等最慢那个，16 台机器的 OS 调度抖动全部串进 p99；③ 吃 host CPU，而那正是争用最凶处（引擎循环、输出线程、detokenize）。<br>
+      异步调度省下来的本来就只有 <code>schedule()</code> 那几百微秒；<b>若 gloo 也要几百微秒，等于把刚省下的气泡还回去</b>。开 MTP 后 drafter 自己还同步一次，<b>一个 decode step 至少 2 趟</b>，代价翻倍。</p>
+
+      <div class="gt"><span class="lb" style="color:var(--npu)"><b>omni-npu</b><br><span class="small" style="font-weight:400"><code>enable_aicpu_dp_sync</code></span></span>
+        <div class="c dev" style="width:296px;min-width:296px">上一步的 Forward N ── Sample N（不受影响）</div>
+        <div class="c gap" style="width:196px;min-width:196px"></div>
+      </div>
+      <div class="gt"><span class="lb" style="color:var(--npu)">专用 copy stream<br><span class="small" style="font-weight:400">AI_CPU 展开</span></span>
+        <div class="c cpy">H2D</div>
+        <div class="c cpy">all_reduce</div>
+        <div class="c cpy">D2H</div>
+        <div class="c" style="width:196px;min-width:196px;border:none;background:none;justify-content:flex-start;font-size:12.5px;color:var(--npu)">与 forward N <b>真并行</b></div>
+      </div>
+      <div class="gt"><span class="lb">host</span>
+        <div class="c bub" style="width:296px;min-width:296px"><code style="background:none;color:inherit">event.synchronize()</code> 只等这一个</div>
+      </div>
+      <p class="foot" style="margin:6px 0 0">D2H 前面<b>不再排着 forward N</b>，只等 all_reduce 本身 → 同时拿到<b>设备互联的低延迟</b>与<b>不序列化</b>。它<b>完全绕开 <code>_get_device_and_group()</code></b>，也就绕开了 <code>disable_nccl_for_dp_synchronization</code> 这个变量——是一条<b>并列的独立实现</b>，不是在 gloo 那条路上再改一层。</p>
+    </div>
+
+    <p><b>omni-npu 这条路的三件套一件都不能少</b>——尤其第三条，是「全局用 AIV、唯独这个域换 AI_CPU」的原因：</p>
+    <table>
+      <thead><tr><th>手段</th><th>拆掉了哪一环</th></tr></thead>
+      <tbody>
+        <tr><td><b>专用 copy stream</b><br><span class="small">H2D → all_reduce → D2H 全在侧流</span></td><td>D2H 前面不再排着 forward N → <b>只等 all_reduce 本身</b>，序列化消失</td></tr>
+        <tr><td><b>pinned CPU tensor + <code>event.synchronize()</code></b></td><td>只等这一个 event、<b>不做全设备同步</b> → 不牵连主流上任何别的工作</td></tr>
+        <tr><td><b>该域单独换成 AI_CPU 展开</b><br><span class="small">通信算子的<b>下发</b>由谁执行：启动脚本与主通信域都用 <b>AIV</b>（向量核），唯独 DP-sync 这个域换成 <b>AI_CPU</b>（设备控制核）</span></td><td>通信算子的下发不再抢<b>向量核</b>——向量核正被 forward N 占满，若仍用 AIV，<b>即使挂了独立流也得排队等 AIV，等于侧流白挂、序列化原地复活</b></td></tr>
+      </tbody>
+    </table>
+    <p class="small">前两条只是「让侧流存在」，<b>第三条才让侧流在 forward 满载时真的能向前推进</b>。<b>净收益方向</b>：收益是<b>每步、每次 forward</b> 的——320 字节纯延迟敏感小包，HCCS/RDMA 远低于 16-rank TCP gloo，开 MTP 还 ×2；抖动从「16 台机器的 Linux 调度器」换成设备控制核，<b>TPOT p99 收紧</b>；代价却是<b>静态一次性</b>的——每 rank 20MB HCCL buffer 从 KV cache 预算里扣。静态换动态，方向有利。</p>
+
+  </section>
+  <!-- ============ 页脚 ============ -->
+  <section>
+
+    <p class="note" style="margin-top:18px;"><b>系列总览</b>：Part1 先导知识 · Part2 调度（含 continuous batching 及模型侧适配）· <b>Part3 异步调度（本篇）</b> · Part4 Padding（图 padding + 多 DP padding）。</p>
+    <div class="chips" style="margin-top:12px;">
+      <span class="cp">Part1 先导知识</span>
+      <span class="cp">Part2 调度（同步口径）</span>
+      <span class="cp" style="border-color:var(--accent); background:#fbeaf1;">Part3 异步调度</span>
+      <span class="cp">Part4 Padding</span>
+    </div>
+  </section>
+</main>
+
+<script>
+  // 目录滚动高亮
+  const links = Array.from(document.querySelectorAll('.toc a'));
+  const map = {};
+  links.forEach(a => { const id = a.getAttribute('href').slice(1); const el = document.getElementById(id); if (el) map[id] = a; });
+  const obs = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const a = map[e.target.id];
+        if (a) a.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-10% 0px -80% 0px', threshold: 0 });
+  Object.keys(map).forEach(id => obs.observe(document.getElementById(id)));
+</script>
+</body>
+</html>
